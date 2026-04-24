@@ -9,8 +9,9 @@ import { ExcelFile, MergeConfig, JoinPair } from './types';
 export default function App() {
   const [fileA, setFileA] = useState<ExcelFile | null>(null);
   const [fileB, setFileB] = useState<ExcelFile | null>(null);
-  const [rawFiles, setRawFiles] = useState<{ a: File | null; b: File | null }>({ a: null, b: null });
-  const [loading, setLoading] = useState<{ a: boolean; b: boolean; processing: boolean }>({ a: false, b: false, processing: false });
+  const [fileSearch, setFileSearch] = useState<ExcelFile | null>(null);
+  const [rawFiles, setRawFiles] = useState<{ a: File | null; b: File | null; search: File | null }>({ a: null, b: null, search: null });
+  const [loading, setLoading] = useState<{ a: boolean; b: boolean; search: boolean; processing: boolean }>({ a: false, b: false, search: false, processing: false });
   const [detectedCols, setDetectedCols] = useState<any>(null);
   const [merging, setMerging] = useState(false);
   const [result, setResult] = useState<any[] | null>(null);
@@ -107,11 +108,14 @@ export default function App() {
           setLoading(prev => ({ ...prev, a: false }));
           const firstCol = columns[0] || '';
           setConfig(prev => ({ ...prev, joinPairs: [{ columnA: firstCol, columnB: prev.joinPairs[0].columnB }] }));
-        } else {
+        } else if (fileIndex === 1) {
           setFileB(excelFile);
           setLoading(prev => ({ ...prev, b: false }));
           const firstCol = columns[0] || '';
           setConfig(prev => ({ ...prev, joinPairs: [{ columnA: prev.joinPairs[0].columnA, columnB: firstCol }] }));
+        } else if (fileIndex === 2) {
+          setFileSearch(excelFile);
+          setLoading(prev => ({ ...prev, search: false }));
         }
       }
       if (type === 'PROCESS_SUCCESS') {
@@ -123,7 +127,7 @@ export default function App() {
       }
       if (type === 'ERROR') {
         alert(payload);
-        setLoading({ a: false, b: false, processing: false });
+        setLoading({ a: false, b: false, search: false, processing: false });
         setMerging(false);
       }
     };
@@ -131,8 +135,9 @@ export default function App() {
   }, []);
 
   const handleFileSelect = (file: File, index: number) => {
-    setRawFiles(prev => ({ ...prev, [index === 0 ? 'a' : 'b']: file }));
-    setLoading(prev => ({ ...prev, [index === 0 ? 'a' : 'b']: true }));
+    const fileKey = index === 0 ? 'a' : (index === 1 ? 'b' : 'search');
+    setRawFiles(prev => ({ ...prev, [fileKey]: file }));
+    setLoading(prev => ({ ...prev, [fileKey]: true }));
     workerRef.current?.postMessage({
       type: 'READ_FILE',
       payload: { file, fileIndex: index }
@@ -144,11 +149,26 @@ export default function App() {
   const handleMerge = () => {
     if (!fileA || !fileB) return;
     
-    // Parse manual IDs if provided
-    const ids = manualIds
-      .split(/[\n,]+/)
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
+    let ids: string[] = [];
+
+    // Prioritize search file (File 3) if provided
+    if (fileSearch && fileSearch.data.length > 0) {
+      // Find possible ID columns in fileSearch
+      const keys = Object.keys(fileSearch.data[0]);
+      const idKey = keys.find(k => k.toUpperCase().includes('MA_DDO') || k.toUpperCase().includes('MPOINT') || k.toUpperCase().includes('MÃ')) || keys[0];
+      ids = fileSearch.data.map((row: any) => String(row[idKey] || '').trim()).filter(id => id.length > 0);
+    } else {
+      // Parse manual IDs
+      ids = manualIds
+        .split(/[\n,]+/)
+        .map(id => id.trim())
+        .filter(id => id.length > 0);
+    }
+
+    if (ids.length === 0) {
+      alert("Vui lòng nhập mã điểm đó hoặc tải lên file danh sách cần tìm.");
+      return;
+    }
 
     setMerging(true);
     setLoading(prev => ({ ...prev, processing: true }));
@@ -181,7 +201,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen py-10 px-8 max-w-[1280px] mx-auto flex flex-col font-sans">
+    <div className="min-h-screen py-10 px-8 max-w-[1440px] mx-auto flex flex-col font-sans">
       {/* Header */}
       <header className="flex justify-between items-end border-b-4 border-slate-900 pb-6 mb-12">
         <div>
@@ -229,6 +249,21 @@ export default function App() {
                 selectedFile={rawFiles.b}
                 isLoading={loading.b}
               />
+              <div className="pt-4 border-t border-slate-200 mt-4">
+                <FileUpload 
+                  label="FILE 3 (DANH SÁCH CẦN TÌM - OPTIONAL)"
+                  onFileSelect={(f) => handleFileSelect(f, 2)}
+                  onClear={() => { 
+                    setFileSearch(null); 
+                    setRawFiles(prev => ({ ...prev, search: null })); 
+                  }}
+                  selectedFile={rawFiles.search}
+                  isLoading={loading.search}
+                />
+                <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-tighter">
+                  Gợi ý: Tải file Excel có cột MA_DDO để tìm nhanh nhiều mã.
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -242,17 +277,20 @@ export default function App() {
             
             <div className="flex-1 space-y-6">
               <div className="p-6 bg-slate-50 border border-slate-200">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2 block">NHẬP MÃ ĐIỂM ĐO (MA_DDO)</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                  {rawFiles.search ? "ĐÃ TẢI DANH SÁCH TỪ FILE 3" : "NHẬP MÃ ĐIỂM ĐO (MA_DDO)"}
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={manualIds}
                     onChange={(e) => setManualIds(e.target.value)}
-                    placeholder="Ví dụ: PB15040057656001"
-                    className="input-geo flex-1 h-14 text-xl font-mono"
+                    placeholder={rawFiles.search ? "Ưu tiên tìm theo file đã tải..." : "Ví dụ: PB15040057656001"}
+                    disabled={!!rawFiles.search}
+                    className="input-geo flex-1 h-14 text-xl font-mono disabled:opacity-50 disabled:bg-slate-100"
                   />
                   <button
-                    disabled={!fileA || !fileB || merging || !manualIds}
+                    disabled={!fileA || !fileB || merging || (!manualIds && !fileSearch)}
                     onClick={handleMerge}
                     className="btn-geo h-14 px-10"
                   >
@@ -280,6 +318,7 @@ export default function App() {
                       <table className="w-full text-left border-collapse min-w-[900px]">
                         <thead className="bg-slate-900 text-white font-mono text-[10px] uppercase">
                           <tr>
+                            <th className="p-3 border-r border-slate-700 w-12 text-center">STT</th>
                             <th className="p-3 border-r border-slate-700">ID (MA_DDO)</th>
                             <th className="p-3 border-r border-slate-700">SO_CTO</th>
                             <th className="p-3 border-r border-slate-700">BCS</th>
@@ -293,6 +332,7 @@ export default function App() {
                         <tbody className="font-mono text-[11px]">
                           {result.map((row, idx) => (
                             <tr key={idx} className={`border-b border-slate-200 ${row.KET_QUA === 1 ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                              <td className="p-3 border-r border-slate-200 text-center text-slate-400">{idx + 1}</td>
                               <td className="p-3 border-r border-slate-200 font-bold text-slate-900 uppercase">{row.MA_DDO}</td>
                               <td className="p-3 border-r border-slate-200 uppercase">{row.SO_CTO}</td>
                               <td className="p-3 border-r border-slate-200 font-bold text-indigo-600 truncate max-w-[40px] text-center" title={row.BCS}>{row.BCS}</td>
