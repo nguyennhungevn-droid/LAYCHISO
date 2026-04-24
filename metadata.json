@@ -1,0 +1,6 @@
+{
+  "name": "Big Data Excel Processor",
+  "description": "An efficient tool to merge and process large Excel files with high performance using streaming and background workers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
